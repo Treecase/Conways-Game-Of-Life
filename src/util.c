@@ -6,9 +6,37 @@
 #include "util.h"
 
 
+/* update the board */
+void updateBoard (LifeBoard *board) {
+
+
+
+}
+
+/* copy the board onto the surface for drawing */
+void blitBoardToSurface (LifeBoard board, SDL_Surface *s) {
+
+    SDL_LockSurface (s);
+    for (int y = 0; y < board.h; ++y)
+        for (int x = 0; x < board.w; ++x)
+            for (int bit = 0; bit < 8; ++bit) {
+                //printf ("%i.%i, %i: %i\n", x, bit+1, y, (board.cells[(board.w * y) + x] & (1 << bit)) % 2);
+                // 8 cells per char in board
+                if (board.cells[(board.w * y) + x] & (1 << bit))
+                    // living cell, draw black
+                    setPixel (s, (x*8)+bit, y, 0xFF000000);
+                else
+                    // dead cell, draw white
+                    setPixel (s, (x*8)+bit, y, 0xFFFFFFFF);
+                }
+    SDL_UnlockSurface (s);
+}
+
+
+
 /* draw pixel on a surface at x,y
     pixel format: 0xAABBGGRR */
-void drawPixel (SDL_Surface *s, int x, int y, Uint32 colour) {
+void setPixel (SDL_Surface *s, int x, int y, Uint32 colour) {
 
     if (x <= 0 || x >= SWIDTH || y <= 0 || y >= SHEIGHT)
         return;

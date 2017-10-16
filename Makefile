@@ -23,7 +23,7 @@ $(OBJS) : $(OBJSRC) $(OBJHEADERS) $(HEADERS)
 	$(CC) -c $(OBJSRC)
 	mv $(addsuffix .o, $(OBJNAMES)) $(OBJDIR)
 
-git : $(OBJS)
+git :
 	rm $(OBJS)
 
 clean :

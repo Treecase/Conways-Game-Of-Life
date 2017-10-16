@@ -11,4 +11,10 @@
 #define SHEIGHT 480     // window height
 
 
+typedef struct LifeBoard {
+    unsigned char cells[(SWIDTH * SHEIGHT) / 8];   // each char contains 8 bits, each bit is a cell
+    unsigned int w, h;
+} LifeBoard;
+
+
 #endif
