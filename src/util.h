@@ -15,6 +15,11 @@ void updateBoard (LifeBoard *board);
 
 void blitBoardToSurface (LifeBoard board, SDL_Surface *surface);
 
+
+void drawGrid (SDL_Surface *surf);
+
+void setBox (SDL_Surface *surf, int x, int y, int r, Uint32 c);
+
 void setPixel (SDL_Surface *surf, int x, int y, Uint32 colour);
 
 int initLibs();
