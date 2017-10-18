@@ -7,13 +7,12 @@
 #define DEFS_H
 
 
-#define SWIDTH  640     // window width
-#define SHEIGHT 480     // window height
-#define PIXSIZE 32      // size of the cells (in px)
+unsigned int SWIDTH, SHEIGHT, PIXSIZE;
 
 
 typedef struct LifeBoard {
-    unsigned char *cells;   // each char contains 8 bits, each bit is a cell
+    // each char contains 8 bits, each bit is a cell
+    unsigned char *cells;
     unsigned int w, h;
 } LifeBoard;
 

@@ -8,6 +8,7 @@
 
 
 #include <SDL2/SDL.h>
+
 #include "defs.h"
 
 
@@ -15,6 +16,12 @@ void updateBoard (LifeBoard *board);
 
 void blitBoardToSurface (LifeBoard board, SDL_Surface *surface);
 
+
+void randomizeBoard (LifeBoard *board);
+
+void eraseBoard (LifeBoard *board);
+
+void setCell (LifeBoard *board, int x, int y, unsigned char state);
 
 void drawGrid (SDL_Surface *surf);
 
