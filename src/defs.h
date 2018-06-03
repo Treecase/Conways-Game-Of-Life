@@ -6,14 +6,18 @@
 #ifndef DEFS_H
 #define DEFS_H
 
+#define __PACKED_BOARD  0
 
-unsigned int SWIDTH, SHEIGHT, PIXSIZE;
-
-
+/* LifeBoard:
+ *  contains board info
+ *
+ *  if `__PACKED_BOARD' is not 0,
+ *  each byte contains 8 cells
+ */
 typedef struct LifeBoard {
-    // each char contains 8 bits, each bit is a cell
     unsigned char *cells;
-    unsigned int w, h;
+    unsigned       w,h,
+                   pitch;   /* w in bytes */
 } LifeBoard;
 
 

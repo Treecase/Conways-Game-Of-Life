@@ -5,163 +5,126 @@
 
 #include "util.h"
 
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <stdbool.h>
 
-/* update the board */
-void updateBoard (LifeBoard *b) {
 
-    LifeBoard nextBoard;
-    nextBoard.cells = malloc (b->w * b->h);
-    memset (nextBoard.cells, 0, b->w * b->h);
+unsigned long get_off  (LifeBoard b, int x, int y);
+bool between (int n, int min, int max);
 
+
+/* millis: */
+long double millis(void) {
+    struct timespec spec;
+    clock_gettime (CLOCK_MONOTONIC, &spec);
+    return spec.tv_sec + (spec.tv_nsec / 1000000000.0L);
+}
+
+/* update_board:
+    live cells with <2  neighbors die,
+    live cells with >3  neighbors die,
+    live cells with 2-3 neighbors live,
+    dead cells with  3  neighbors live */
+void update_board (LifeBoard *b) {
+
+    LifeBoard new_cells = { .cells=NULL, .w=b->w, .h=b->h, .pitch=b->pitch };
+    new_cells.cells = calloc (new_cells.pitch * new_cells.h, 1);
+
+    /* check each cell */
     for (int y = 0; y < b->h; ++y) {
         for (int x = 0; x < b->w; ++x) {
-            for (char bit = 0; bit < 8; ++bit) {
-                char nbrs = 0;      // # of live neighbors
-                char isAlive = (b->cells[(b->w * y) + x] & (1 << bit)) ? 1 : 0;
-                // count living neighbors
-                for (int y0 = -1; y0 <= 1; ++y0) {
-                    for (int x0 = -1, x1 = 0; x0 <= 1; ++x0, x1 = 0) {
-                        if (x+x0 < 0 || y+y0 < 0 || x+x0 > b->w || y+y0 > b->h)
-                            continue;
-                        int nbit = bit+x0;
-                        if (bit == 0 && x0 == -1) {
-                            x1 = -1;
-                            nbit = 7;
-                        }
-                        if (bit == 7 && x0 == +1) {
-                            x1 = +1;
-                            nbit = 0;
-                        }
-                        nbrs += (b->cells[(b->w * (y+y0)) + (x+x1)] & (1 << nbit)) ? 1 : 0;
-                    }
-                }
-                nbrs -= isAlive;
-                // logic
-                if ((!isAlive && nbrs == 3) || (isAlive && (nbrs == 2 || nbrs == 3)))
-                    nextBoard.cells[(b->w * y) + x] |= (1 << bit);
-                else
-                    nextBoard.cells[(b->w * y) + x] -= (0 << bit);
-            }
+
+            int  live_neighbors = 0;
+            bool is_alive       = get_cell (*b, x,y);
+            /*  count living neighbors in the
+                3x3 area around the cell:
+                    ###
+                    # #
+                    ###
+             */
+            for (int row = -1; row <= 1; ++row)
+                for (int col = -1; col <= 1; ++col)
+                    if (between (y+row, 0, b->h-1) && between (x+col, 0, b->w-1))
+                        live_neighbors += get_cell(*b, x+col, y+row);
+
+            /*  the above loop went over the cell
+                being considered, so we must compensate
+                by subtracting 1 if the cell is alive */
+            live_neighbors -= is_alive;
+
+            /* live if  alive and 2-3 neighbors  or  dead and 3 neighbors */
+            if ((is_alive && between (live_neighbors, 2,3))
+            || (!is_alive && live_neighbors == 3))
+                set_cell (&new_cells, x,y, 1);
+            /* dead if  <2 neighbors  or  >3 neighbors */
+            else
+                set_cell (&new_cells, x,y, 0);
         }
     }
-    memcpy (b->cells, nextBoard.cells, b->w * b->h);
+    free (b->cells);
+    b->cells = new_cells.cells;
 }
 
-/* copy the board onto the surface for drawing */
-void blitBoardToSurface (LifeBoard board, SDL_Surface *s) {
-
-    SDL_LockSurface (s);
-    for (int y = 0; y < board.h; ++y)
-        for (int x = 0; x < board.w; ++x)
-            for (int bit = 0; bit < 8; ++bit) {
-                // 8 cells per char in board
-                if (board.cells[(board.w * y) + x] & (1 << bit))
-                    // living cell, draw black
-                    setBox (s, ((x*8)+bit)*PIXSIZE, y*PIXSIZE, PIXSIZE, 0xFF000000);
-                else
-                    // dead cell, draw white
-                    setBox (s, ((x*8)+bit)*PIXSIZE, y*PIXSIZE, PIXSIZE, 0xFFFFFFFF);
-                }
-    SDL_UnlockSurface (s);
+/* randomize_board: */
+void randomize_board (LifeBoard *b) {
+    for (int x = 0; x < b->w; ++x)
+        for (int y = 0; y < b->h; ++y)
+            set_cell (b, x,y, rand() % 2);
 }
 
-
-
-/* randomize the board */
-void randomizeBoard (LifeBoard *b) {
-
-    for (int x = 0; x < SWIDTH; ++x)
-        for (int y = 0; y < SHEIGHT; ++y)
-            setCell (b, x, y, rand() % 2);
+/* erase_board: */
+inline void erase_board (LifeBoard *b) {
+    memset (b->cells, 0, b->pitch * b->h);
 }
 
-void eraseBoard (LifeBoard *b) {
+/* set_cell:
+    change some cell's state */
+void set_cell (LifeBoard *b, int x, int y, unsigned char on) {
 
-    memset (b->cells, 0, b->w * b->h);
-}
+    unsigned long offset = get_off (*b, x,y);
+    unsigned shift = 0;
+#if __PACKED_BOARD
+    shift = x % 8;
+#endif
 
-/* set a cell in a LifeBoard */
-void setCell (LifeBoard *b, int x, int y, unsigned char state) {
-
-    if (x < 0 && y < 0 && x > b->w && y > b->h)
-        return;
-
-    x /= PIXSIZE;
-    y /= PIXSIZE;
-
-    if (state)
-        b->cells[(b->w * y) + x/8] |= (1 << (x % 8));
+    if (x >= 0 || y >= 0 || x < b->w || y < b->h) {
+        if (on)
+            b->cells[offset] |=   1 << shift;
+        else
+            b->cells[offset] &= ~(1 << shift);
+    }
     else
-        b->cells[(b->w * y) + x/8] -= (1 << (x % 8));
+        error ("x/y out of range: %i %i > %i %i\n", x,y, b->w,b->h);
 }
 
-/* draw a grid */
-void drawGrid (SDL_Surface *s) {
-    Uint32 colour = 0xFFAAAAAA;
-    for (int x = 0; x < SWIDTH; ++x)
-        for (int y = PIXSIZE; y < SHEIGHT; y += PIXSIZE) {
-            setPixel (s, x, y, colour);
-        }
-    for (int y = 0; y < SHEIGHT; ++y)
-        for (int x = PIXSIZE; x < SWIDTH; x += PIXSIZE) {
-            setPixel (s, x, y, colour);
-        }
+/* get_cell:
+    get the state of some cell */
+inline unsigned char get_cell (LifeBoard b, int x, int y) {
+    unsigned char cell = b.cells[get_off (b, x,y)];
+#if __PACKED_BOARD
+    return (cell >> (x % 8)) & 1;
+#else
+    return cell;
+#endif
 }
 
-/* draw a box on a surface centred at x,y of w/h r
-    colour format: 0xAABBGGRR */
-void setBox (SDL_Surface *s, int x, int y, int r, Uint32 c) {
 
-    for (int x0 = 0; x0 < r; ++x0)
-        for (int y0 = 0; y0 < r; ++y0)
-            setPixel (s, x+x0, y+y0, c);
+
+/* get_off:
+    calculate array offset for cell @ x,y */
+inline unsigned long get_off (LifeBoard b, int x, int y) {
+#if __PACKED_BOARD
+    return (b.pitch * y) + (x/8);
+#else
+    return (b.pitch * y) + x;
+#endif
 }
 
-/* draw pixel on a surface at x,y
-    pixel format: 0xAABBGGRR */
-void setPixel (SDL_Surface *s, int x, int y, Uint32 colour) {
-
-    if (x <= 0 || x >= SWIDTH || y <= 0 || y >= SHEIGHT)
-        return;
-    int bpp = s->format->BytesPerPixel;
-    /* get pixel address */
-    Uint8 *p = (Uint8 *)s->pixels + y * s->pitch + x * bpp;
-
-    switch (bpp) {
-    case 1:
-        *p = colour;
-        break;
-
-    case 2:
-        *(Uint16 *)p = colour;
-        break;
-
-    case 3:
-        if (SDL_BYTEORDER == SDL_BIG_ENDIAN) {
-            p[0] = (colour >> 16) & 0xff;
-            p[1] = (colour >> 8) & 0xff;
-            p[2] = colour & 0xff;
-        }
-        else {
-            p[0] = colour & 0xff;
-            p[1] = (colour >> 8) & 0xff;
-            p[2] = (colour >> 16) & 0xff;
-        }
-        break;
-
-    case 4:
-        *(Uint32 *)p = colour;
-        break;
-    }
+/* between:
+    min <= n <= max? */
+inline bool between (int n, int min, int max) {
+    return min <= n && n <= max;
 }
 
-/* initiailize libraries */
-int initLibs() {
-
-    int status = 0;
-    if (SDL_Init (SDL_INIT_VIDEO)) {
-        status++;
-        printf ("SDL_Init error: %s\n", SDL_GetError());
-    }
-    return status;
-}

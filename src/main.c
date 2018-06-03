@@ -3,153 +3,225 @@
  *
  */
 
-#include <SDL2/SDL.h>
-#include <string.h>
-#include <stdlib.h>
-#include <time.h>
+#include "option.h"
 
 #include "util.h"
 #include "defs.h"
+#include "graphics.h"
+
+#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include <assert.h>
+#include <errno.h>
 
 
+/* game speed (delay between frames) */
+const long double DELTASPEED = 0.05L;
+
+
+
+/* Conway's Game of Life */
 int main (int argc, char *argv[]) {
 
-    srand (time (NULL));
+    /* from option.h */
+    pname = argv[0];
 
-    SDL_Window *win;
-    SDL_Surface *winSurf;
+    LifeBoard board;
+    board.w = 80;
+    board.h = 60;
 
-    extern unsigned int SWIDTH, SHEIGHT, PIXSIZE;
-    SWIDTH = 640;
-    SHEIGHT = 480;
-    PIXSIZE = 8;
-
-    unsigned int DRAWDELAY, lastUpdate, iterations, time;
-    DRAWDELAY = 10;
-    lastUpdate = time = 0;
-
-    char GRID;
-    GRID = 1;
+    /* config stuff */
+    long double delay    = DELTASPEED;
+    bool        drawgrid = false;
 
 
-    for (int i = 1; i < argc; ++i) {
-        // pixel size
-        if (i+1 <= argc && !strcmp (argv[i], "-p") || !strcmp (argv[i], "--pixsize"))
-            PIXSIZE = atoi (argv[++i]);
+    /* command line options */
+    int opt, longopt;
+    while ((opt = getopt_long (argc, argv, shortopts, longopts, &longopt)) != -1) {
+        switch (opt) {
+        /* -p/--pixsize: set pixel size (ie scaling) */
+        case 'p':
+            pixsize = atoi (optarg);
+            break;
+        /* -d/--delay: sim speed */
+        case 'd':
+          { char *t;
+            delay = strtold (optarg, &t);
+            if (t == optarg)    fatal ("'%s' is not a valid delay!\n", optarg);
+          } break;
+        /* -g/--grid: display grid (y/n) */
+        case 'g':
+            drawgrid = true;
+            break;
+        /* -s/--size: set the board size */
+        case 's':
+        case 'S':   /* s is from -s, S is from --size */
+          { if (optind >= argc || *argv[optind] == '-') {
+                fprintf (stderr, "%s: option requires a second argument %s'\n",
+                    pname,
+                    optionstr (opt == 's'? "-s" : "--size"));
+                print_usage (USAGE_ERROR);
+            }
 
-        // delay between draws size
-        else if (i+1 <= argc && !strcmp (argv[i], "-d") || !strcmp (argv[i], "--delay"))
-            DRAWDELAY = atoi (argv[++i]);
+            char *t;
+            board.w = strtol (optarg, &t, 10);
+            if (t == optarg)            fatal ("'%s' is not a valid width!\n", optarg);
 
-        // display grid?
-        else if (i+1 <= argc && !strcmp (argv[i], "-g") || !strcmp (argv[i], "--grid"))
-            GRID = atoi (argv[++i]);
+            board.h = strtol (argv[optind++], &t, 10);
+            if (t == argv[optind-1])    fatal ("'%s' is not a valid height!\n", argv[optind-1]);
+            /*                      ^^^^
+                technically we shouldn't be screwing with optind,
+                but this seems to be the only way to do it.    */
+          } break;
+        /*    --help: print help */
+        case 'h':
+            print_usage (USAGE_HELP);
+            break;
 
-        // invalid arg
-        else
-            return printf ("Invalid argument: '%s'\n", argv[i]);
+        /* getopt hit an error */
+        case '?':
+            print_usage (USAGE_ERROR);
+            break;
+        /* a Very Bad Thing happened */
+        default:
+            fprintf (stderr, "%s: %s option %s'\n",
+                pname,
+                !strncmp (argv[optind-1], "--", 2)? "unrecognized" : "invalid",
+                optionstr (argv[optind-1]));
+            print_usage (USAGE_ERROR);
+            break;
+        }
     }
 
+    assert (board.w > 0);
+    assert (board.h > 0);
 
-    // the game board
-    LifeBoard board;
-    board.w = ((SWIDTH / 8) + ((SWIDTH % 8) % 2)) / PIXSIZE;
-    board.h = SHEIGHT / PIXSIZE;
-    board.cells = malloc (board.w * board.h);
-    memset (board.cells, 0, board.w * board.h);
+    /* these depend on the width
+        (screen_width, screen_height, and
+        pixsize are declared in graphics.c) */
+    screen_width  = board.w * pixsize;
+    screen_height = board.h * pixsize;
 
-    // initialize libs
-    if (!initLibs)
-        return puts ("Library initialization failed!");
+    board.pitch = board.w;
+#if __PACKED_BOARD
+    board.pitch /= 8;
+#endif
+    assert (board.pitch >= board.w);
 
-    // create window
-    win = SDL_CreateWindow ("Conway's Game of Life", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SWIDTH, SHEIGHT, SDL_WINDOW_BORDERLESS);
-    winSurf = SDL_GetWindowSurface (win);
+    board.cells = calloc (board.pitch * board.h, 1);
 
 
-    // main loop
-    SDL_Event e;
-    int quit = 0;
-    char mousedown, paused;
-    iterations = mousedown = paused = 0;
+    init_graphics();
+    /* main loop */
+    struct event_t e;
+
+    long double lastframe = millis();
+
+    int  mousebtn = MOUSE_NONE;
+
+    bool paused       = false,
+         quit         = false,
+         force_redraw = false;
+
     while (!quit) {
-        // handle events
-        while (SDL_PollEvent (&e))
+
+        /* handle events */ 
+        while (get_input (&e)) {
             switch (e.type) {
-            // mouse events
-            case SDL_MOUSEBUTTONDOWN:
-                mousedown = e.button.button;
-                setCell (&board, e.motion.x, e.motion.y, 1);
+            /* mouse events */
+            case EVENT_MOUSEUP:
+                mousebtn = MOUSE_NONE;
                 break;
 
-            case SDL_MOUSEBUTTONUP:
-                mousedown = 0;
+            case EVENT_MOUSEDOWN:
+                mousebtn = e.mousebtn;
+            case EVENT_MOUSEMOVE:
+                if (mousebtn == MOUSE_LEFT)
+                    set_cell (&board, e.x, e.y, 1);
+                else if (mousebtn == MOUSE_RIGHT)
+                    set_cell (&board, e.x, e.y, 0);
                 break;
 
-            case SDL_MOUSEMOTION:
-                if (mousedown == SDL_BUTTON_LEFT)
-                    setCell (&board, e.motion.x, e.motion.y, 1);
-                else if (mousedown == SDL_BUTTON_RIGHT)
-                    setCell (&board, e.motion.x, e.motion.y, 0);
-                break;
-
-
-            // keyboard events
-            case SDL_KEYDOWN:
-                switch (e.key.keysym.scancode) {
-                case SDL_SCANCODE_SPACE:
+            /* keyboard events */
+            case EVENT_KEYDOWN:
+                switch (e.key) {
+                case ' ':
                     paused = !paused;
                     break;
 
-                case SDL_SCANCODE_R:
-                    randomizeBoard (&board);
+                case 'r':
+                    randomize_board (&board);
                     break;
 
-                case SDL_SCANCODE_E:
-                    eraseBoard (&board);
+                case 'e':
+                    erase_board (&board);
                     break;
 
-                case SDL_SCANCODE_ESCAPE:{
-                    SDL_Event quitEvent;
-                    quitEvent.type = SDL_QUIT;
-                    SDL_PushEvent (&quitEvent);
-                    break; }
+                case ',':
+                    delay += DELTASPEED;
+                    break;
+                case '.':
+                    delay -= (delay - DELTASPEED > 0)? DELTASPEED : 0;
+                    break;
+
+                /* TODO: resize the game board instead of just zooming out
+                         also, zoom out centered instead of pushing
+                        everything up and left  */
+                case '-':
+                    pixsize -= (pixsize - 1 > 0)? 1 : 0;
+                    force_redraw = true;
+                    break;
+                case '=':
+                case '+':
+                    pixsize += 1;
+                    force_redraw = true;
+                    break;
+
+                case 'q':
+                case '':
+                    quit = true;
+                    break;
                 }
                 break;
 
-            // quit events
-            case SDL_QUIT:
-                quit = 1;
+            /* quit events */
+            case EVENT_QUIT:
+                quit = true;
+                break;
+
+            /* window events */
+            case EVENT_REDRAW:
+                force_redraw = true;
                 break;
             }
-        // main loop
-
-        blitBoardToSurface (board, winSurf);
-
-        if (GRID || paused)
-            drawGrid (winSurf);
-
-        if (paused)
-            setBox (winSurf, 0, SHEIGHT-5, 5, 0xFFFF0000);
-
-        SDL_UpdateWindowSurface (win);
-
-        if (!paused && lastUpdate - time >= DRAWDELAY) {
-            updateBoard (&board);
-            lastUpdate = time;
-            iterations++;
         }
-        time++;
+
+        /* update the screen */
+        if (force_redraw || millis() - lastframe >= delay) {
+
+            if (!paused)
+                update_board (&board);
+
+            blit_board (board);
+
+            if (drawgrid || paused)
+                draw_grid();
+
+            update_screen();
+
+            lastframe = millis();
+            force_redraw = false;
+        }
     }
 
 
-    // cleanup
-    SDL_FreeSurface (winSurf);
-    winSurf = NULL;
-    SDL_DestroyWindow (win);
-    win = NULL;
+    /*  cleanup
+        (graphics stuff is handled
+         by an atexit() callback) */
+    free (board.cells);
 
-    SDL_Quit();
-
-    return 0;
+    return EXIT_SUCCESS;
 }
+
